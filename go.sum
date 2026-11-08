@@ -1,0 +1,4 @@
+github.com/0mjs/zinc v0.7.3 h1:dee+uoQwG1dc/75oHJTgXCn5zTRXgGR6GaaxmpVkC1s=
+github.com/0mjs/zinc v0.7.3/go.mod h1:Ag8wdd9gqaDEDlFmapYOjKhLOVlmcWS7+KikreXSH9M=
+github.com/google/uuid v1.6.0 h1:NIvaJDMOsjHA8n1jAhLSgzrAzy1Hgr+hNrb57e+94F0=
+github.com/google/uuid v1.6.0/go.mod h1:TIyPZe4MgqvfeYDBFedMoGGpEw/LqOeaOT+nhxU+yHo=
