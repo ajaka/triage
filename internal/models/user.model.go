@@ -16,6 +16,7 @@ const (
 
 type User struct {
 	Id               uuid.UUID `json:"id" db:"id" redis:"id"`
+	Role             Role      `json:"role" db:"role" redis:"db"`
 	AccountNo        string    `json:"account_no" db:"account_no" redis:"account_no"`
 	FirstName        string    `json:"first_name" db:"first_name" redis:"first_name"`
 	LastName         string    `json:"last_name" db:"last_name" redis:"last_name"`
