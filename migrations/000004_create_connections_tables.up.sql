@@ -1,7 +1,7 @@
 CREATE TYPE conn_status AS ENUM ('pending','accepted','rejected','expired');
 
 CREATE TABLE IF NOT EXISTS conns(
-    id UUID PRIMARY KEY DEFAULT uuidv7(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     org_id UUID NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
     status conn_status NOT NULL DEFAULT 'pending',
