@@ -4,9 +4,10 @@ CREATE TABLE IF NOT EXISTS conns(
     id UUID PRIMARY KEY DEFAULT uuidv7(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     org_id UUID NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
-    status conn_status DEFAULT 'pending',
-    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+    status conn_status NOT NULL DEFAULT 'pending',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id, org_id)
 );
 
 CREATE INDEX idx_conns_created_at ON conns(created_at);
