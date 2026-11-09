@@ -25,3 +25,8 @@ CREATE TRIGGER trigger_webhooks_updated_at
 BEFORE UPDATE ON webhooks
 FOR EACH ROW
 EXECUTE FUNCTION update_updated_at();
+
+CREATE TRIGGER trigger_currencies_updated_at
+BEFORE UPDATE ON currencies
+FOR EACH ROW
+EXECUTE FUNCTION update_updated_at();
