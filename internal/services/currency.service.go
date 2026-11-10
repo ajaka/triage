@@ -3,7 +3,9 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -258,9 +260,8 @@ func (c *CurrencyService) HandleWebsocketConn(ctx context.Context, allowedSymbol
 	newUrl.RawQuery = queries.Encode()
 	c.logger.Info("ws", "query", newUrl.String())
 
-	var shutdown atomic.Bool
 	dialer := websocket.Dialer{HandshakeTimeout: 15 * time.Second}
-	initialConn, err := c.connect(ctx, dialer, newUrl.String(), &shutdown)
+	initialConn, err := c.connect(ctx, dialer, newUrl.String())
 	if err != nil {
 		return err
 	}
@@ -278,7 +279,7 @@ func (c *CurrencyService) HandleWebsocketConn(ctx context.Context, allowedSymbol
 					current.Close()
 				}
 			}()
-
+			errorsInRow := 0
 			for {
 				current := conn.Load()
 				if current == nil {
@@ -287,22 +288,38 @@ func (c *CurrencyService) HandleWebsocketConn(ctx context.Context, allowedSymbol
 
 				_, msg, err := current.ReadMessage()
 				if err != nil {
-					if shutdown.Load() {
+					var closeErr *websocket.CloseError
+					var netErr net.Error
+					switch {
+					case errors.Is(err, net.ErrClosed):
 						return
+					case errors.As(err, &closeErr):
+						c.logger.Info("connection closed by server, reconnecing...", "code", closeErr.Code)
+					case errors.As(err, &netErr):
+						c.logger.Warn("network error, reconnecting...", "error", err)
+					default:
+						c.logger.Warn("An Error occured while reading from websocket", "error", err.Error())
+						errorsInRow++
+						if errorsInRow > 3 {
+							c.logger.Error("An Unknown error has occured 3 times in a row. Exiting now.", "error", err.Error())
+							return
+						}
+						continue
 					}
-					newConn, err := c.connect(ctx, dialer, newUrl.String(), &shutdown)
+
+					errorsInRow = 0
+					newConn, err := c.connect(ctx, dialer, newUrl.String())
 					if err != nil {
 						errChan <- err
 						return
 					}
+					c.logger.Info("Reconnection succeded")
 					if old := conn.Swap(newConn); old != nil {
 						old.Close()
 					}
-					if shutdown.Load() {
-						newConn.Close()
-						return
-					}
 					continue
+				} else {
+					errorsInRow = 0
 				}
 
 				select {
@@ -316,7 +333,6 @@ func (c *CurrencyService) HandleWebsocketConn(ctx context.Context, allowedSymbol
 		for {
 			select {
 			case <-ctx.Done():
-				shutdown.Store(true)
 				if old := conn.Swap(nil); old != nil {
 					old.Close()
 				}
@@ -351,12 +367,9 @@ func (c *CurrencyService) HandleWebsocketConn(ctx context.Context, allowedSymbol
 	return nil
 }
 
-func (c *CurrencyService) connect(ctx context.Context, dialer websocket.Dialer, url string, shutdown *atomic.Bool) (*websocket.Conn, error) {
+func (c *CurrencyService) connect(ctx context.Context, dialer websocket.Dialer, url string) (*websocket.Conn, error) {
 	var lastErr error
 	for attempt := range 3 {
-		if shutdown.Load() {
-			return nil, ctx.Err()
-		}
 		conn, _, err := dialer.DialContext(ctx, url, nil)
 		if err == nil {
 			return conn, nil
