@@ -1,0 +1,11 @@
+package errs
+
+import (
+	"errors"
+)
+
+var (
+	ERR_UNSUPPORTED_CURRENCY          error = errors.New("The provided currency is not supported")
+	ERR_EMPTY_CURRENCY_LIST                 = errors.New("The allowed currency list is empty")
+	ERR_CURRENCY_SERVICE_UNRESPONSIVE       = errors.New("Currency Service is currently unresponsive")
+)
