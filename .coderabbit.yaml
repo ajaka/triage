@@ -1,0 +1,60 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+
+language: "en-US"
+tone_instructions: "You are a senior principal engineer reviewing a Go banking backend. Be concise, direct, and prioritize financial data integrity, concurrency safety, security vulnerabilities, and idiomatic Go."
+
+early_access: false
+
+reviews:
+  profile: "assertive"
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  review_status: true
+  collapse_walkthrough: true
+
+  auto_review:
+    enabled: true
+    drafts: false
+    base_branches:
+      - "main"
+      - "dev"
+
+  path_filters:
+    - "!go.sum"
+    - "!vendor/**"
+    - "!**/*.gen.go"
+    - "!**/mocks/**"
+
+  path_instructions:
+    - path: "**/*.go"
+      instructions: |
+        Review for idiomatic Go and robust backend engineering:
+        - Strict error handling: Verify errors are wrapped with context using `fmt.Errorf("...: %w", err)` and never ignored without justification.
+        - Concurrency & race safety: Flag potential race conditions, unbuffered channel deadlocks, and ensure thread safety on shared state.
+        - Context propagation: Ensure `context.Context` is passed as the first parameter to functions performing I/O or database operations, and cancellation is honored.
+        - Security & logging: Ensure sensitive credentials (passwords, private keys, secret tokens) are never logged via slog or exposed in error messages.
+
+    - path: "internal/models/**"
+      instructions: |
+        Review Go domain models:
+        - Ensure struct tags (`json`, `db`, `redis`) match database column names and schema constraints.
+        - Verify sensitive fields (e.g., `Password`, internal secrets) have `json:"-"` to prevent accidental serialization.
+        - Check that numeric types match database definitions (e.g., `BIGINT` mapped to `int64` for minor currency units/cents to prevent rounding inaccuracies).
+
+    - path: "migrations/**"
+      instructions: |
+        Review PostgreSQL migrations:
+        - Verify data integrity constraints (foreign keys, NOT NULL, CHECK, UNIQUE constraints).
+        - Ensure down migrations accurately roll back the corresponding up migrations without leaving orphaned types, tables, or indexes.
+        - Check that index strategies are appropriate for query patterns and updated_at triggers are applied consistently.
+
+    - path: "**/*_test.go"
+      instructions: |
+        Review test files:
+        - Prefer table-driven tests for comprehensive case coverage.
+        - Ensure concurrent tests (`t.Parallel()`) do not share mutable state.
+        - Verify mock or test transactions cleanly roll back to avoid test pollution.
+
+chat:
+  auto_reply: true
