@@ -1,6 +1,6 @@
 # Currency Service Architecture
 
-This document describes the design and architecture of the currency service in `triage`.
+Nov 11, 2026 · @Someone
 
 ## Purpose
 
@@ -8,17 +8,17 @@ The currency service maintains live exchange rates for a small set of fiat curre
 
 ## Module location
 
-```
+```text
 internal/services/currency/
-  currency.service.go    # Core service, actor loop, Init, Shutdown
-  binance.currency.go    # Binance integration (encode, validity check, websocket)
-  messenger.currency.go  # Request/response messenger
+  currency.service.go      # Core service, actor loop, Init, Shutdown
+  binance.currency.go      # Binance integration (encode, validity check, websocket)
+  messenger.currency.go    # Request/response messenger
   currency_service_test.go # Tests
 ```
 
 ## Components
 
-### `CurrencyService`
+### CurrencyService
 
 Holds runtime state:
 
@@ -29,7 +29,7 @@ Holds runtime state:
 | `logger` | `*slog.Logger`                   | Structured logger                                            |
 | `env`    | `*configs.Env`                   | Runtime configuration                                        |
 
-### `CurrencyServiceMessenger`
+### CurrencyServiceMessenger
 
 The public entry point for conversion requests. Holds a single channel (`messageChan`) through which `CurrencyRequest` messages are sent to the actor loop.
 
@@ -49,7 +49,7 @@ type CurrencyResponse struct {
 
 `MakeCurrencyRequest(ctx, from, to)` sends a request and waits for a response, with a 5-second timeout on both the send and the receive.
 
-### `CurrencyUpdateMessage`
+### CurrencyUpdateMessage
 
 Internal message produced by the Binance WebSocket reader and consumed by the actor loop:
 
@@ -82,7 +82,7 @@ type CurrencyUpdateMessage struct {
    - Returns the `allowed` map; currencies not in `ALLOWED_PAIRS` are not added to the store.
 4. **Prune store** — iterates `c.store`; keeps only currencies whose `CODE + BASE` symbol is in the Binance `allowed` map, deleting the rest.
 5. **Empty list guard** — if no symbols remain, returns `errs.ERR_EMPTY_CURRENCY_LIST`.
-6. **Connect WebSocket** — calls `HandleWebsocketConn(ctx, symbols, currencyUpdateChan)` to open a Binance trade stream for the allowed symbols (lowercased, e.g. `eurusdt@trade`).
+6. **Connect WebSocket** — creates the buffered (capacity 1) `currencyUpdateChan`, then calls `HandleWebsocketConn(ctx, symbols, currencyUpdateChan)` to open a Binance trade stream for the allowed symbols (lowercased, e.g. `eurusdt@trade`). If the initial connection fails after its retries, `Init` returns that error and the service doesn't start.
 7. **Start actor loop** — launches a goroutine that:
    - Listens on `ctx.Done()` → calls `Shutdown(ctx)` and returns.
    - Listens on `currencyUpdateChan` → updates `c.store[code].LastKnownRateToDollars`.
@@ -94,26 +94,30 @@ type CurrencyUpdateMessage struct {
 
 Serializes `values` (a `[]string` of symbols) to JSON and sets it as a query parameter on `baseURL`. Used to query `exchangeInfo` for a specific list of symbols.
 
+### `connect(ctx, dialer, url)`
+
+Shared dial helper: up to 3 attempts, with a 1s / 2s / 3s backoff between them. Used both for the initial WebSocket connection and for every reconnect, so both paths share the same retry behavior.
+
 ### `checkValidityAndBuildAllowedCurrencies`
 
 Validates that the currencies the application knows about are actually tradable on Binance:
 
 - Builds `initiallyAllowed` from `ALLOWED_PAIRS`.
 - For each active DB currency, if `CODE + BASE` is in `initiallyAllowed`, adds it to `c.store` and appends the symbol to the query list.
-- Calls Binance `exchangeInfo`; returns `errs.ERR_BINANCE_BAD_RESPONSE` on non-200 status.
+- Calls Binance `exchangeInfo` with a 5-second timeout; returns `errs.ERR_BINANCE_BAD_RESPONSE` on non-200 status.
 - Filters Binance response symbols by `status == env.BINANCE_ALLOWED_TERM` into the returned `allowed` map.
 
 ### `HandleWebsocketConn`
 
-- Builds the Binance combined stream URL (` streams=eurusdt@trade/gbpusdt@trade`).
-- Dials with up to 3 reconnection attempts (1s, 2s, 3s backoff).
-- Spawns a reader goroutine that:
-  - Reads WebSocket messages.
-  - On normal closure / network error → reconnects and swaps the connection pointer atomically.
-  - On >3 consecutive unknown errors → sends error to `errChan` and exits.
-  - Drops malformed JSON, symbols without the `USDT` suffix, and prices `<= 0`, `NaN`, or `Inf`.
-  - Sends valid `CurrencyUpdateMessage`s to `currencyUpdateChan`.
-- The main loop selects on `ctx.Done()`, `errChan`, and `msgChan`.
+- Builds the Binance combined stream URL (`streams=eurusdt@trade/gbpusdt@trade`).
+- Opens the initial connection via `connect`; if every attempt fails, returns the error — `Init` then fails too, so the service won't start without a working feed.
+- Runs two goroutines:
+  - **Reader** — reads raw WebSocket frames in a loop:
+    - `net.ErrClosed` (closed by us) → exits, no reconnect.
+    - A server close or a network error → reconnects via `connect` and swaps the connection pointer atomically.
+    - Any other error → retries on the same connection; past 3 in a row, sends to `errChan` and exits for good, no reconnect attempted.
+    - A clean read is forwarded as raw bytes to an internal channel.
+  - **Processor** — selects on `ctx.Done()` (closes the connection, returns), `errChan` (logs and returns), and the reader's raw-byte channel: unmarshals each message, drops malformed JSON, symbols without the `USDT` suffix, and prices that are `<= 0`, `NaN`, or `Inf`, and forwards everything else as a `CurrencyUpdateMessage` to the buffered (capacity 1) `currencyUpdateChan`.
 
 ## Actor loop
 
@@ -131,55 +135,35 @@ Runs inside `Init` as a goroutine. It is the single writer to `c.store` and the 
 ## Shutdown (`Shutdown`)
 
 - If `repo` is nil, returns nil immediately.
+- Builds a fresh 5-second timeout from `context.WithoutCancel(ctx)` — `Shutdown` runs exactly when `ctx` is already done, so stripping its cancellation first is what lets the timeout actually apply instead of failing instantly.
 - Collects all currencies from `c.store`.
-- Calls `repo.UpdateCurrencies(ctx, currencies)` with a 5-second timeout to persist `last_known_rate_to_dollars` for each currency by `id`.
-- Propagates repository errors.
+- Calls `repo.UpdateCurrencies(ctx, currencies)` to persist `last_known_rate_to_dollars` for each currency by `id`, and propagates its error.
+- Called from the actor loop's `ctx.Done()` case; if it errors, the error is logged and the loop exits anyway.
 
 ## Concurrency model
 
 - The actor loop is the **sole writer** to `c.store`.
-- `HandleWebsocketConn` runs in a separate goroutine and communicates with the actor loop exclusively through the buffered `currencyUpdateChan`.
+- `HandleWebsocketConn`'s reader and processor goroutines run separately from the actor loop, communicating with it exclusively through the buffered (capacity 1) `currencyUpdateChan`.
 - `CurrencyServiceMessenger` communicates with the actor loop through `messageChan` (buffered, capacity 100).
 - WebSocket connection pointer is managed with `atomic.Pointer[websocket.Conn]` so reconnection can swap it safely.
 - Context cancellation propagates through `connect`, the WebSocket reader, the actor loop, and `MakeCurrencyRequest`.
 
 ## Data flow
 
-```text
-Binance REST exchangeInfo
-       │
-       ▼
-checkValidityAndBuildAllowedCurrencies  ──► allowed map (TRADING symbols)
-       │                                         │
-       ▼                                         ▼
-c.store populated                      Init prunes store to allowed symbols
-       │                                         │
-       └──────────────┬──────────────────────────┘
-                      ▼
-           HandleWebsocketConn (Binance WS trade stream)
-                      │
-          valid CurrencyUpdateMessage
-                      │
-                      ▼
-              currencyUpdateChan (buffered 1)
-                      │
-                      ▼
-              Actor loop updates c.store
-                      │
-      CurrencyRequestChan ◄────── MakeCurrencyRequest (messenger)
-                      │
-                      ▼
-              CurrencyResponse (Rate, DollarRate)
-                      │
-                      ▼
-              Caller receives conversion result
+```mermaid
+flowchart LR
+    A[Call exchangeInfo] --> B[Find TRADING pairs]
+    B --> C[Prune store]
+    C --> D[Open WS stream]
+    D --> F[Actor loop]
+    E[Client request] --> F
+    F --> G[CurrencyResponse]
+
+    classDef accent fill:#dbeafe,stroke:#2563eb,stroke-width:2px
+    class F accent
 ```
 
-On `ctx.Done()` / shutdown:
-
-```text
-Actor loop ───► Shutdown() ───► repo.UpdateCurrencies (flush last_known_rate_to_dollars to DB)
-```
+The actor loop is the sole writer to the in-memory store; on shutdown it flushes every currency's last known rate to PostgreSQL via `repo.UpdateCurrencies`.
 
 ## Errors
 
