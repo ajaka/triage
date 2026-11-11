@@ -106,12 +106,14 @@ func (c *CurrencyService) checkValidityAndBuildAllowedCurrencies(ctx context.Con
 	}
 
 	resp, err := client.Do(req)
-	if resp.StatusCode != http.StatusOK {
-		return nil, errs.ERR_BINANCE_BAD_RESPONSE
-	}
 	if err != nil {
 		return nil, err
 	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, errs.ERR_BINANCE_BAD_RESPONSE
+	}
+
 	defer resp.Body.Close()
 
 	var masterData BinanceResponse
