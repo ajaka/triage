@@ -1,7 +1,5 @@
 # Currency Service Architecture
 
-Nov 11, 2026 · @Someone
-
 ## Purpose
 
 The currency service maintains live exchange rates for a small set of fiat currencies against USDT (Tether, a USD-pegged stablecoin). It exposes conversion rates to the rest of the application through an actor-style request/response channel, and persists updated rates back to PostgreSQL on shutdown.
