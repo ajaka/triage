@@ -2,6 +2,7 @@ package currency
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"strings"
 	"time"
@@ -36,7 +37,7 @@ func (c *CurrencyService) Init(ctx context.Context, CurrencyRequestChan chan Cur
 	}
 	allowed, err := c.checkValidityAndBuildAllowedCurrencies(ctx, &currencies)
 	if err != nil {
-		return err
+		return fmt.Errorf("validate Binance currency listing: %w", err)
 	}
 
 	var symbols []string
