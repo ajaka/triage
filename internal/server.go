@@ -14,7 +14,7 @@ import (
 	"github.com/ajaka/triage/internal/configs"
 	"github.com/ajaka/triage/internal/middlewares"
 	"github.com/ajaka/triage/internal/repository"
-	"github.com/ajaka/triage/internal/services"
+	"github.com/ajaka/triage/internal/services/currency"
 )
 
 func Listen() error {
@@ -35,7 +35,10 @@ func Listen() error {
 
 	repo := repository.InitRepository(pool)
 
-	services.InitCurrencyService(ctx, repo, baseLogger)
+	_, err = currency.InitCurrencyService(ctx, repo, env, baseLogger)
+	if err != nil {
+		return err
+	}
 
 	app := zinc.New()
 
