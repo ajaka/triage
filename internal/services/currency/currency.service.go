@@ -23,13 +23,19 @@ type CurrencyUpdateMessage struct {
 }
 
 type CurrencyService struct {
-	repo   *repository.Repository
+	repo   repository.RepositoryInterface
 	store  map[string]models.Currency
 	logger *slog.Logger
 	env    *configs.Env
 }
 
 func (c *CurrencyService) Init(ctx context.Context, CurrencyRequestChan chan CurrencyRequest) error {
+	if c.logger == nil {
+		c.logger = slog.Default()
+	}
+	if c.store == nil {
+		c.store = make(map[string]models.Currency)
+	}
 	c.logger.Info("Service starting")
 	currencies, err := c.repo.GetActiveCurrencies(ctx)
 	if err != nil {
@@ -105,6 +111,9 @@ func (c *CurrencyService) Init(ctx context.Context, CurrencyRequestChan chan Cur
 }
 
 func (c *CurrencyService) Shutdown(ctx context.Context) error {
+	if c.repo == nil {
+		return nil
+	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 
@@ -115,7 +124,7 @@ func (c *CurrencyService) Shutdown(ctx context.Context) error {
 	return c.repo.UpdateCurrencies(ctx, currencies)
 }
 
-func InitCurrencyService(ctx context.Context, repo *repository.Repository, env *configs.Env, logger *slog.Logger) (*CurrencyServiceMessenger, error) {
+func InitCurrencyService(ctx context.Context, repo repository.RepositoryInterface, env *configs.Env, logger *slog.Logger) (*CurrencyServiceMessenger, error) {
 	logger = logger.With("service", "currency_service")
 	service := CurrencyService{
 		repo:   repo,
